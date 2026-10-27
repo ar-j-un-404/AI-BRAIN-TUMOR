@@ -1,0 +1,63 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0d1521;color:#edf4fd;font:15px system-ui}h2{font-size:19px;margin:0 0 6px}p{color:#9bb2ca;font-size:13px}.toolbar,.labels{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin:16px 0}.panels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.panel{background:#111e2d;padding:16px;border:1px solid #26394d;border-radius:14px}.viewport{height:300px;display:flex;align-items:center;justify-content:center;background:#030609;margin:14px 0;overflow:hidden}canvas{max-width:100%;max-height:100%;image-rendering:pixelated}input[type=range]{accent-color:#62ddca;cursor:pointer;width:100%;margin:12px 0}button{border:1px solid #39536b;border-radius:7px;padding:9px 13px;background:#1c3044;color:white;cursor:pointer}select{background:#172738;color:#edf4fd;padding:8px;border:1px solid #39536b;border-radius:6px}button:hover{border-color:#62ddca}label{cursor:pointer}output{color:#62ddca}.axes{color:#9bb2ca;font-size:12px;margin:8px 0}.toolbar input[type=range]{width:120px;vertical-align:middle}.badge{color:#62ddca;font-size:12px}button:focus-visible,input:focus-visible{outline:2px solid #62ddca;outline-offset:3px}@media(max-width:650px){.panels{grid-template-columns:1fr}.viewport{height:220px}}
+</style>
+<header><h2>Live slice explorer</h2><span class="badge" id="notice"></span><p>Drag a slice slider: images update locally while you move. Arrow keys also work. Display pixels are 8-bit; original MRI values remain unchanged.</p></header>
+<div class="toolbar"><label><input id="overlay" type="checkbox" checked> Show overlay</label><label>Opacity <input id="opacity" aria-label="Overlay opacity" type="range" min="0" max="100" value="45"></label><button id="center">Center slices</button><button id="save">Save current three views (PNG)</button></div><label>Overlay source <select id="source"><option value="pred">MODEL PREDICTION</option><option value="ref">SUPPLIED REFERENCE</option><option value="error">LABEL DISAGREEMENT</option></select></label><div class="labels" id="labels"></div><div class="panels" id="panels"></div>
+<script>
+'use strict';
+const payload=__VOLUME_PAYLOAD__;
+const bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+const voxels=bytes(payload.image), predicted=payload.mask?bytes(payload.mask):null, reference=payload.reference?bytes(payload.reference):null;
+let mask=predicted;const source=document.getElementById('source');
+source.options[0].disabled=!predicted;source.options[1].disabled=!reference;source.options[2].disabled=!(predicted&&reference);
+source.value=predicted?'pred':'ref';mask=predicted||reference;
+const [nx,ny,nz]=payload.shape, spacing=payload.spacing;
+const palette=[[255,180,84],[98,221,202],[221,133,255],[255,115,137],[119,185,255],[244,230,142]];
+const enabled=new Set(payload.labels.map((_,i)=>i+1));
+const definitions=[['Sagittal',0,1,2,'P → A','I → S'],['Coronal',1,0,2,'L → R','I → S'],['Axial',2,0,1,'L → R','P → A']];
+const panels=[];
+document.getElementById('notice').textContent=predicted?'MODEL PREDICTION — RESEARCH ONLY':reference?'SUPPLIED REFERENCE — NO PREDICTION YET':'MRI ONLY — NO PREDICTION YET';
+const overlay=document.getElementById('overlay'),opacity=document.getElementById('opacity');
+overlay.disabled=!mask;overlay.checked=!!mask;opacity.disabled=!mask;
+payload.labels.forEach((label,i)=>{const wrapper=document.createElement('label');const cb=document.createElement('input');cb.type='checkbox';cb.checked=true;cb.setAttribute('aria-label','Show label '+label);cb.onchange=()=>{cb.checked?enabled.add(i+1):enabled.delete(i+1);schedule();};wrapper.style.color='rgb('+palette[i%palette.length].join(',')+')';wrapper.append(cb,document.createTextNode(' '+({1:'Edema',2:'Non-enhancing tumor',3:'Enhancing tumor'}[label])));document.getElementById('labels').append(wrapper);});
+function render(p){
+ const k=Number(p.slider.value), w=payload.shape[p.u],h=payload.shape[p.v];
+ p.output.textContent=k+' / '+(payload.shape[p.axis]-1);
+ const im=p.ctx.createImageData(w,h), a=Number(opacity.value)/100;
+ for(let row=0;row<h;row++)for(let col=0;col<w;col++){
+  const xyz=[0,0,0];xyz[p.axis]=k;xyz[p.u]=col;xyz[p.v]=h-1-row;
+  const idx=(xyz[0]*ny+xyz[1])*nz+xyz[2],gray=voxels[idx], pos=(row*w+col)*4;
+  const errorMode=source.value==='error';
+  const code=errorMode?(predicted[idx]!==reference[idx]?1:0):(mask?mask[idx]:0),c=errorMode?[255,60,90]:palette[(code-1)%palette.length];
+  const blend=overlay.checked&&(errorMode||enabled.has(code))&&code>0;
+  for(let channel=0;channel<3;channel++)im.data[pos+channel]=blend?Math.round(gray*(1-a)+c[channel]*a):gray;
+  im.data[pos+3]=255;
+ }
+ p.ctx.putImageData(im,0,0);p.canvas.dataset.slice=String(k);
+ const aspect=w*spacing[p.u]/(h*spacing[p.v]);
+ const box=p.canvas.parentElement, width=Math.min(box.clientWidth,box.clientHeight*aspect);
+ p.canvas.style.width=width+'px';p.canvas.style.height=(width/aspect)+'px';
+}
+let pending=false;
+function schedule(){if(!pending){pending=true;requestAnimationFrame(()=>{pending=false;panels.forEach(render);});}}
+for(const [name,axis,u,v,hlabel,vlabel] of definitions){
+ const el=document.createElement('section');el.className='panel';
+ el.innerHTML='<h2>'+name+'</h2><label for="slice-'+axis+'">Slice <output></output></label><input id="slice-'+axis+'" aria-label="'+name+' slice" type="range" min="0" max="'+(payload.shape[axis]-1)+'" value="'+Math.floor(payload.shape[axis]/2)+'"><div class="viewport"><canvas aria-label="'+name+' MRI slice"></canvas></div><div class="axes">Horizontal: '+hlabel+' · Vertical: '+vlabel+'</div>';
+ document.getElementById('panels').append(el);
+ const canvas=el.querySelector('canvas');canvas.width=payload.shape[u];canvas.height=payload.shape[v];
+ const p={name,axis,u,v,canvas,ctx:canvas.getContext('2d'),slider:el.querySelector('input'),output:el.querySelector('output')};
+ p.slider.addEventListener('input',schedule);panels.push(p);
+}
+overlay.onchange=schedule;opacity.oninput=schedule;
+source.onchange=()=>{mask=source.value==='ref'?reference:predicted;document.getElementById('notice').textContent=source.value==='pred'?'MODEL PREDICTION — RESEARCH ONLY':source.value==='ref'?'SUPPLIED REFERENCE — NOT A MODEL PREDICTION':'PREDICTION / REFERENCE LABEL DISAGREEMENT';schedule();};
+document.getElementById('center').onclick=()=>{panels.forEach(p=>p.slider.value=Math.floor(payload.shape[p.axis]/2));schedule();};
+window.addEventListener('resize',schedule);
+document.getElementById('save').onclick=()=>{
+ panels.forEach(render);
+ const out=document.createElement('canvas');out.width=1440;out.height=570;const ctx=out.getContext('2d');ctx.fillStyle='#0d1521';ctx.fillRect(0,0,out.width,out.height);ctx.fillStyle='#62ddca';ctx.font='18px sans-serif';ctx.fillText(document.getElementById('notice').textContent,24,30);
+ panels.forEach((p,i)=>{const aspect=p.canvas.width*spacing[p.u]/(p.canvas.height*spacing[p.v]),w=Math.min(440,430*aspect),h=w/aspect;ctx.imageSmoothingEnabled=false;ctx.drawImage(p.canvas,i*480+20+(440-w)/2,80+(430-h)/2,w,h);ctx.fillStyle='white';ctx.font='18px sans-serif';ctx.fillText(p.name+' · slice '+p.slider.value,i*480+20,64);ctx.fillStyle='#9bb2ca';ctx.font='13px sans-serif';ctx.fillText(definitions[i][4]+' horizontal / '+definitions[i][5]+' vertical',i*480+20,550);});
+ const link=document.createElement('a');link.download='brain_tumor_research_views.png';link.href=out.toDataURL('image/png');link.click();
+};
+schedule();
+</script></html>
