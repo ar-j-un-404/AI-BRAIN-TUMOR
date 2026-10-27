@@ -1,0 +1,112 @@
+[
+  {
+    "name": "btc_ixi",
+    "files": [
+      "run_training.py",
+      "protocol.py",
+      "core.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  },
+  {
+    "name": "physical_space",
+    "files": [
+      "start.py",
+      "run_training.py",
+      "protocol.py",
+      "core.py",
+      "geometry.py",
+      "test_geometry.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  },
+  {
+    "name": "border_probe",
+    "files": [
+      "start.py",
+      "protocol.py",
+      "features.py",
+      "test_probe.py",
+      "run_probe.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  },
+  {
+    "name": "brain_extraction",
+    "files": [
+      "start.py",
+      "setup_assets.py",
+      "qc.py",
+      "protocol.py",
+      "run_qc.py",
+      "test_qc.py",
+      "worker.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  },
+  {
+    "name": "mask_review",
+    "files": [
+      "start.py",
+      "test_review.py",
+      "app.py",
+      "review_core.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  },
+  {
+    "name": "extraction_comparison",
+    "files": [
+      "start.py",
+      "prepare.py",
+      "test_workflow.py",
+      "run_training.py",
+      "qc.py",
+      "protocol.py",
+      "core.py",
+      "runtime_check.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  },
+  {
+    "name": "input_audit",
+    "files": [
+      "start.py",
+      "run_audit.py",
+      "protocol.py",
+      "test_audit.py",
+      "audit_utils.py",
+      "core.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  },
+  {
+    "name": "btc_only",
+    "files": [
+      "start.py",
+      "run_training.py",
+      "protocol.py",
+      "test_sampling.py",
+      "core.py",
+      "sampling.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  },
+  {
+    "name": "nnunet",
+    "files": [
+      "evaluate_regions.py",
+      "train_entry.py",
+      "run_benchmark.py",
+      "compare_regions.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  },
+  {
+    "name": "modalities",
+    "files": [
+      "run_comparison.py"
+    ],
+    "status": "Research source; original private manifests and model assets required. Not launched by the app."
+  }
+]

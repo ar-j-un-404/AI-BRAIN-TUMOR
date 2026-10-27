@@ -1,0 +1,57 @@
+{
+  "units": "percent",
+  "provenance": "Aggregate user-provided experiment reports; not recomputed by this repository build.",
+  "segmentation": [
+    {
+      "model": "nnU-Net 3D",
+      "evaluation": "73 validation cases",
+      "WT Dice": 90.83,
+      "TC Dice": 83.41,
+      "ET Dice": 76.76
+    },
+    {
+      "model": "2D U-Net",
+      "evaluation": "73 internal-test cases; already evaluated",
+      "WT Dice": 90.78,
+      "TC Dice": 81.36,
+      "ET Dice": 75.58
+    },
+    {
+      "model": "Small 3D U-Net",
+      "evaluation": "73 validation cases",
+      "WT Dice": 82.38,
+      "TC Dice": 66.86,
+      "ET Dice": 65.12
+    }
+  ],
+  "classification": [
+    {
+      "experiment": "Original BTC + IXI",
+      "BTC accuracy": 75.0,
+      "BTC balanced accuracy": 59.09,
+      "Sensitivity": 100.0,
+      "Specificity": 18.18
+    },
+    {
+      "experiment": "Physical-space BTC + IXI",
+      "BTC accuracy": 58.33,
+      "BTC balanced accuracy": 42.0,
+      "Sensitivity": 84.0,
+      "Specificity": 0.0
+    },
+    {
+      "experiment": "Brain-extracted BTC + IXI",
+      "BTC accuracy": 52.78,
+      "BTC balanced accuracy": 40.55,
+      "Sensitivity": 72.0,
+      "Specificity": 9.09
+    },
+    {
+      "experiment": "Brain-extracted BTC only",
+      "BTC accuracy": 50.0,
+      "BTC balanced accuracy": 38.55,
+      "Sensitivity": 68.0,
+      "Specificity": 9.09
+    }
+  ]
+}
