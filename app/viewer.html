@@ -1,0 +1,129 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0d1521;color:#edf4fd;font:15px system-ui}h2{font-size:19px;margin:0 0 6px}p{color:#9bb2ca;font-size:13px}.toolbar,.labels{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin:16px 0}.panels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.panel{background:#111e2d;padding:16px;border:1px solid #26394d;border-radius:14px}.viewport{height:300px;display:flex;align-items:center;justify-content:center;background:#030609;margin:14px 0;overflow:hidden}canvas{max-width:100%;max-height:100%;image-rendering:pixelated}input[type=range]{accent-color:#62ddca;cursor:pointer;width:100%;margin:12px 0}button{border:1px solid #39536b;border-radius:7px;padding:9px 13px;background:#1c3044;color:white;cursor:pointer}select{background:#172738;color:#edf4fd;padding:8px;border:1px solid #39536b;border-radius:6px}button:hover{border-color:#62ddca}label{cursor:pointer}output{color:#62ddca}.axes{color:#9bb2ca;font-size:12px;margin:8px 0}.toolbar input[type=range]{width:120px;vertical-align:middle}.badge{color:#62ddca;font-size:12px}button:focus-visible,input:focus-visible{outline:2px solid #62ddca;outline-offset:3px}@media(max-width:650px){.panels{grid-template-columns:1fr}.viewport{height:220px}}
+[hidden]{display:none!important}.view-tabs{display:flex;gap:8px;margin:18px 0}.view-tabs button{font-size:17px;padding:13px 24px}.view-tabs button[aria-selected="true"]{background:#62ddca;color:#071b24;border-color:#62ddca;font-weight:700}</style>
+<script>__PLOTLY_JS__</script><div style="height:790px;overflow:auto;padding:12px"><header><h2>BrainTumor AI · MRI &amp; tumor explorer</h2><span class="badge" id="notice"></span></header>
+<div class="view-tabs" role="tablist" aria-label="Viewer mode"><button id="tab2d" role="tab" aria-selected="true" aria-controls="view2d">2D MRI slices</button><button id="tab3d" role="tab" aria-selected="false" aria-controls="view3d" tabindex="-1">3D tumor model</button></div>
+<label>Mask source <select id="source"><option value="pred">MODEL PREDICTION</option><option value="ref">SUPPLIED REFERENCE</option><option value="error">LABEL DISAGREEMENT (2D only)</option></select></label><div class="labels" id="labels"></div><section id="view2d" role="tabpanel" aria-labelledby="tab2d">
+<p>Drag the sliders for immediate slice updates. Click a slice to position the other views.</p>
+<div class="toolbar"><label><input id="overlay" type="checkbox" checked> Show overlay</label><label>Overlay opacity <input id="opacity" aria-label="Overlay opacity" type="range" min="0" max="100" value="45"></label><button id="center">Center slices</button><button id="save">Save 2D views (PNG)</button></div><div class="panels" id="panels"></div></section><section id="view3d" role="tabpanel" aria-labelledby="tab3d" hidden class="panel" style="margin-top:12px"><div class="toolbar">
+<button id="reset3d">Reset camera</button><button id="axial3d">Axial camera</button><button id="coronal3d">Coronal camera</button><button id="sagittal3d">Sagittal camera</button>
+<label><input id="planes3d" type="checkbox"> MRI planes</label>
+<label>Surface opacity <input id="surfaceOpacity" type="range" min="0" max="100" value="65"></label>
+<button id="focus3d">Locate region in 2D</button><button id="png3d">Save 3D PNG</button><button id="html3d">Save interactive HTML</button>
+</div><div id="plot3d" style="height:500px"></div><p id="status3d">Preparing 3D view…</p><p id="volumes3d"></p>
+<p>Drag to rotate · scroll to zoom · click a tumor surface to set the 2D slice positions. Axes use the MRI affine in R/A/S millimeters. Surfaces use approximate 2-voxel occupancy blocks for display; volumes use full-resolution labels. No brain surface is invented.</p></section></div><script>
+'use strict';
+const originalDocument='<!doctype html>'+document.documentElement.outerHTML;
+const payload=__VOLUME_PAYLOAD__;
+const bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+const voxels=bytes(payload.image), predicted=payload.mask?bytes(payload.mask):null, reference=payload.reference?bytes(payload.reference):null;
+let mask=predicted;const source=document.getElementById('source');
+source.options[0].disabled=!predicted;source.options[1].disabled=!reference;source.options[2].disabled=!(predicted&&reference);
+source.value=predicted?'pred':'ref';mask=predicted||reference;
+const [nx,ny,nz]=payload.shape, spacing=payload.spacing;
+const palette=[[255,180,84],[98,221,202],[221,133,255],[255,115,137],[119,185,255],[244,230,142]];
+const enabled=new Set(payload.labels.map((_,i)=>i+1));
+const definitions=[['Sagittal',0,1,2,'P → A','I → S'],['Coronal',1,0,2,'L → R','I → S'],['Axial',2,0,1,'L → R','P → A']];
+const panels=[];
+document.getElementById('notice').textContent=predicted?'MODEL PREDICTION — RESEARCH ONLY':reference?'SUPPLIED REFERENCE — NO PREDICTION YET':'MRI ONLY — NO PREDICTION YET';
+const overlay=document.getElementById('overlay'),opacity=document.getElementById('opacity');
+overlay.disabled=!mask;overlay.checked=!!mask;opacity.disabled=!mask;
+payload.labels.forEach((label,i)=>{const wrapper=document.createElement('label');const cb=document.createElement('input');cb.type='checkbox';cb.checked=true;cb.setAttribute('aria-label','Show label '+label);cb.onchange=()=>{cb.checked?enabled.add(i+1):enabled.delete(i+1);schedule();};wrapper.style.color='rgb('+palette[i%palette.length].join(',')+')';wrapper.append(cb,document.createTextNode(' '+({1:'Edema',2:'Non-enhancing tumor',3:'Enhancing tumor'}[label])));document.getElementById('labels').append(wrapper);});
+function render(p){
+ const k=Number(p.slider.value), w=payload.shape[p.u],h=payload.shape[p.v];
+ p.output.textContent=k+' / '+(payload.shape[p.axis]-1);
+ const im=p.ctx.createImageData(w,h), a=Number(opacity.value)/100;
+ for(let row=0;row<h;row++)for(let col=0;col<w;col++){
+  const xyz=[0,0,0];xyz[p.axis]=k;xyz[p.u]=col;xyz[p.v]=h-1-row;
+  const idx=(xyz[0]*ny+xyz[1])*nz+xyz[2],gray=voxels[idx], pos=(row*w+col)*4;
+  const errorMode=source.value==='error';
+  const code=errorMode?(predicted[idx]!==reference[idx]?1:0):(mask?mask[idx]:0),c=errorMode?[255,60,90]:palette[(code-1)%palette.length];
+  const blend=overlay.checked&&(errorMode||enabled.has(code))&&code>0;
+  for(let channel=0;channel<3;channel++)im.data[pos+channel]=blend?Math.round(gray*(1-a)+c[channel]*a):gray;
+  im.data[pos+3]=255;
+ }
+ p.ctx.putImageData(im,0,0);p.canvas.dataset.slice=String(k);
+ const aspect=w*spacing[p.u]/(h*spacing[p.v]);
+ const box=p.canvas.parentElement, width=Math.min(box.clientWidth,box.clientHeight*aspect);
+ p.canvas.style.width=width+'px';p.canvas.style.height=(width/aspect)+'px';
+}
+let pending=false;
+function schedule(){if(!pending){pending=true;requestAnimationFrame(()=>{pending=false;panels.forEach(render);if (typeof request3d === "function") request3d();});}}
+for(const [name,axis,u,v,hlabel,vlabel] of definitions){
+ const el=document.createElement('section');el.className='panel';
+ el.innerHTML='<h2>'+name+'</h2><label for="slice-'+axis+'">Slice <output></output></label><input id="slice-'+axis+'" aria-label="'+name+' slice" type="range" min="0" max="'+(payload.shape[axis]-1)+'" value="'+Math.floor(payload.shape[axis]/2)+'"><div class="viewport"><canvas aria-label="'+name+' MRI slice"></canvas></div><div class="axes">Horizontal: '+hlabel+' · Vertical: '+vlabel+'</div>';
+ document.getElementById('panels').append(el);
+ const canvas=el.querySelector('canvas');canvas.width=payload.shape[u];canvas.height=payload.shape[v];
+ const p={name,axis,u,v,canvas,ctx:canvas.getContext('2d'),slider:el.querySelector('input'),output:el.querySelector('output')};
+ p.slider.addEventListener('input',schedule);panels.push(p);
+ canvas.addEventListener('click',e=>{const r=canvas.getBoundingClientRect();panels[p.u].slider.value=Math.max(0,Math.min(payload.shape[p.u]-1,Math.floor((e.clientX-r.left)/r.width*payload.shape[p.u])));panels[p.v].slider.value=Math.max(0,Math.min(payload.shape[p.v]-1,payload.shape[p.v]-1-Math.floor((e.clientY-r.top)/r.height*payload.shape[p.v])));schedule();});
+}
+overlay.onchange=schedule;opacity.oninput=schedule;
+source.onchange=()=>{mask=source.value==='ref'?reference:predicted;document.getElementById('notice').textContent=source.value==='pred'?'MODEL PREDICTION — RESEARCH ONLY':source.value==='ref'?'SUPPLIED REFERENCE — NOT A MODEL PREDICTION':'PREDICTION / REFERENCE LABEL DISAGREEMENT';schedule();};
+document.getElementById('center').onclick=()=>{panels.forEach(p=>p.slider.value=Math.floor(payload.shape[p.axis]/2));schedule();};
+window.addEventListener('resize',schedule);
+document.getElementById('save').onclick=()=>{
+ panels.forEach(render);
+ const out=document.createElement('canvas');out.width=1440;out.height=570;const ctx=out.getContext('2d');ctx.fillStyle='#0d1521';ctx.fillRect(0,0,out.width,out.height);ctx.fillStyle='#62ddca';ctx.font='18px sans-serif';ctx.fillText(document.getElementById('notice').textContent,24,30);
+ panels.forEach((p,i)=>{const aspect=p.canvas.width*spacing[p.u]/(p.canvas.height*spacing[p.v]),w=Math.min(440,430*aspect),h=w/aspect;ctx.imageSmoothingEnabled=false;ctx.drawImage(p.canvas,i*480+20+(440-w)/2,80+(430-h)/2,w,h);ctx.fillStyle='white';ctx.font='18px sans-serif';ctx.fillText(p.name+' · slice '+p.slider.value,i*480+20,64);ctx.fillStyle='#9bb2ca';ctx.font='13px sans-serif';ctx.fillText(definitions[i][4]+' horizontal / '+definitions[i][5]+' vertical',i*480+20,550);});
+ const link=document.createElement('a');link.download='brain_tumor_research_views.png';link.href=out.toDataURL('image/png');link.click();
+};
+const graph=document.getElementById('plot3d'), A=payload.affine;
+const home={eye:{x:1.6,y:-1.7,z:1.2},up:{x:0,y:0,z:1}};
+let ready3d=false,busy3d=false,dirty3d=false,lastGeometry='',geometryKey='',lastPlanes='',planeKey='';
+const activeSource=()=>source.value==='ref'?'ref':'pred';
+const world=v=>[0,1,2].map(i=>A[i][3]+A[i][0]*v[0]+A[i][1]*v[1]+A[i][2]*v[2]);
+const a=A[0][0],b=A[0][1],c=A[0][2],d=A[1][0],e=A[1][1],f=A[1][2],g=A[2][0],h=A[2][1],ii=A[2][2];
+const det=a*(e*ii-f*h)-b*(d*ii-f*g)+c*(d*h-e*g);
+const inv=[[e*ii-f*h,c*h-b*ii,b*f-c*e],[f*g-d*ii,a*ii-c*g,c*d-a*f],[d*h-e*g,b*g-a*h,a*e-b*d]].map(r=>r.map(v=>v/det));
+function voxel(w){const t=w.map((v,j)=>v-A[j][3]);return inv.map(r=>r.reduce((v,k,j)=>v+k*t[j],0));}
+function plane(p){
+ const xs=[],ys=[],zs=[],cs=[],step=3,k=Number(p.slider.value);
+ const us=Array.from({length:Math.ceil((payload.shape[p.u]-1)/step)+1},(_,i)=>Math.min(i*step,payload.shape[p.u]-1));
+ const vs=Array.from({length:Math.ceil((payload.shape[p.v]-1)/step)+1},(_,i)=>Math.min(i*step,payload.shape[p.v]-1));
+ for(const v of vs){const xr=[],yr=[],zr=[],cr=[];for(const u of us){const xyz=[0,0,0];xyz[p.axis]=k;xyz[p.u]=u;xyz[p.v]=v;const w=world(xyz);xr.push(w[0]);yr.push(w[1]);zr.push(w[2]);cr.push(voxels[(xyz[0]*ny+xyz[1])*nz+xyz[2]]);}xs.push(xr);ys.push(yr);zs.push(zr);cs.push(cr);}
+ return {type:'surface',name:p.name+' MRI',x:xs,y:ys,z:zs,surfacecolor:cs,colorscale:[[0,'#000000'],[1,'#ffffff']],cmin:0,cmax:255,showscale:false,hoverinfo:'skip',opacity:.85,visible:document.getElementById('planes3d').checked};
+}
+const corners=[];for(const x of [0,nx-1])for(const y of [0,ny-1])for(const z of [0,nz-1])corners.push(world([x,y,z]));
+const axis=(j,title)=>({title,range:[Math.min(...corners.map(v=>v[j]))-2,Math.max(...corners.map(v=>v[j]))+2],color:'#9bb2ca',gridcolor:'#26394d',showbackground:false});
+const layout={paper_bgcolor:'#0d1521',plot_bgcolor:'#0d1521',font:{color:'#edf4fd'},margin:{l:0,r:0,t:10,b:0},height:500,uirevision:'linked-mri',showlegend:false,scene:{camera:home,aspectmode:'data',xaxis:axis(0,'R (mm)'),yaxis:axis(1,'A (mm)'),zaxis:axis(2,'S (mm)')}};
+function traces(){return [...panels.map(plane),...(payload.meshes[activeSource()]||[]).map(m=>{const {label,...trace}=m;return {...trace,visible:enabled.has(label),opacity:Number(document.getElementById('surfaceOpacity').value)/100};})];}
+function updateVolumes(){const vs=payload.volumes[activeSource()]||[];document.getElementById('volumes3d').textContent=vs.length?vs.map(v=>v.name+': '+v.ml.toFixed(2)+' mL').join(' · ')+' · Whole tumor: '+vs.reduce((n,v)=>n+v.ml,0).toFixed(2)+' mL':'No segmentation loaded; MRI planes only.';document.getElementById('status3d').textContent=source.value==='error'?'3D shows MODEL PREDICTION; label disagreement is shown only in the 2D overlays.':activeSource()==='ref'?'3D SUPPLIED REFERENCE — not a model prediction':'3D MODEL PREDICTION — research only';if(!(payload.meshes[activeSource()]||[]).length)document.getElementById('status3d').textContent='No tumor surfaces in the selected source. Run segmentation or select a supplied reference mask; enable MRI planes to view anatomy.';}
+async function request3d(){
+ if(!ready3d)return;dirty3d=true;if(busy3d)return;busy3d=true;
+ try{while(dirty3d){dirty3d=false;geometryKey=activeSource()+'|'+[...enabled].sort()+'|'+document.getElementById('surfaceOpacity').value;planeKey=panels.map(p=>p.slider.value).join(',')+'|'+document.getElementById('planes3d').checked;
+ if(geometryKey!==lastGeometry){await Plotly.react(graph,traces(),layout,{responsive:true,displaylogo:false,scrollZoom:true});lastGeometry=geometryKey;lastPlanes=planeKey;}
+ else if(planeKey!==lastPlanes){const ps=panels.map(plane);await Plotly.restyle(graph,{x:ps.map(p=>p.x),y:ps.map(p=>p.y),z:ps.map(p=>p.z),surfacecolor:ps.map(p=>p.surfacecolor),visible:ps.map(p=>p.visible)},[0,1,2]);lastPlanes=planeKey;}
+ updateVolumes();}}
+ catch(err){document.getElementById('status3d').textContent='3D render error: '+err.message;}
+ finally{busy3d=false;}
+}
+function camera(eye,up={x:0,y:0,z:1}){Plotly.relayout(graph,{'scene.camera':{eye,up}});}
+document.getElementById('reset3d').onclick=()=>camera(home.eye);
+document.getElementById('axial3d').onclick=()=>camera({x:0,y:0,z:2.5},{x:0,y:1,z:0});
+document.getElementById('coronal3d').onclick=()=>camera({x:0,y:-2.5,z:0});
+document.getElementById('sagittal3d').onclick=()=>camera({x:2.5,y:0,z:0});
+document.getElementById('planes3d').onchange=request3d;
+document.getElementById('surfaceOpacity').oninput=request3d;
+document.getElementById('focus3d').onclick=()=>{const m=activeSource()==='ref'?reference:predicted;if(!m)return;let n=0,sum=[0,0,0];for(let x=0;x<nx;x++)for(let y=0;y<ny;y++)for(let z=0;z<nz;z++){const label=m[(x*ny+y)*nz+z];if(label&&enabled.has(label)){n++;sum[0]+=x;sum[1]+=y;sum[2]+=z;}}if(n){panels.forEach((p,j)=>p.slider.value=Math.round(sum[j]/n));schedule();}};
+document.getElementById('png3d').onclick=()=>Plotly.downloadImage(graph,{format:'png',filename:'brain_tumor_3d_research',width:1400,height:1000});
+const exportHtml=originalDocument;
+document.getElementById('html3d').onclick=()=>{const blob=new Blob([exportHtml],{type:'text/html'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='brain_tumor_interactive_research.html';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};
+let started3d=false;
+function initialize3d(){if(started3d)return;started3d=true;
+Plotly.newPlot(graph,traces(),layout,{responsive:true,displaylogo:false,scrollZoom:true}).then(()=>{ready3d=true;request3d();graph.on('plotly_click',ev=>{const pt=ev.points[0];if(!pt||pt.data.type!=='mesh3d')return;const v=voxel([pt.x,pt.y,pt.z]);panels.forEach((p,j)=>p.slider.value=Math.max(0,Math.min(payload.shape[j]-1,Math.round(v[j]))));schedule();});}).catch(err=>{document.getElementById('status3d').textContent='3D unavailable: '+err.message+' — 2D slices remain available.';});
+}
+
+function switchView(which){
+ const is3d=which==='3d';
+ document.getElementById('view2d').hidden=is3d;document.getElementById('view3d').hidden=!is3d;
+ for(const id of ['2d','3d']){const tab=document.getElementById('tab'+id);tab.setAttribute('aria-selected',String(id===which));tab.tabIndex=id===which?0:-1;}
+ if(is3d){initialize3d();if(ready3d){Plotly.Plots.resize(graph);request3d();}}
+ else schedule();
+}
+for(const id of ['2d','3d']){const tab=document.getElementById('tab'+id);tab.onclick=()=>switchView(id);tab.onkeydown=ev=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(ev.key)){ev.preventDefault();const next=ev.key==='Home'?'2d':ev.key==='End'?'3d':id==='2d'?'3d':'2d';switchView(next);document.getElementById('tab'+next).focus();}};}
+const locate=document.getElementById('focus3d'),locateAction=locate.onclick;
+locate.onclick=()=>{locateAction();switchView('2d');};
+schedule();
+</script></html>
